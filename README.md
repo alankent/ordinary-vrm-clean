@@ -30,9 +30,11 @@ lengths of all the point mesh details as part of my learnings.)
 
 ## So how do I use it?
 
-I grab a `.vrm` file exported from VRoid Studio, rename it to `.glb`,
-open in Omniverse USD Composer (formerly "Create"), right click and
-"Convert to USD". I then open the USD file and click the "Clean" button.
+I grab a `.vrm` file exported from [VRoid Studio](https://vroid.com/en/studio),
+rename it to `.glb`, open in Omniverse USD Composer (formerly "Create"),
+right click and "Convert to USD". I then open the USD file and click the
+"Clean" button. It restructures things in the currently opened character
+USD file.
 
 [VRM](https://github.com/vrm-c) files are in GLB format (the binary form of
 glTF) but follow some additional standards to help with interchange in VR apps
@@ -48,5 +50,24 @@ still suffers from problems in Omniverse:
 
 * The root bone is lost during the GLB import process, making animation clips not work correctly
 * [Audio2Face](https://www.nvidia.com/en-us/omniverse/apps/audio2face/) does not like the meshes VRoid Studio generates
-* Need to add hair physics (TODO)
-* Need to add cloth physics for clothes (TODO)
+* Need to add hair physics (not started)
+* Need to add cloth physics for clothes, like skirts (not started)
+
+## Why am I doing this?
+
+I tell people I am trying to create an animated cartoon series to publish
+on YouTube. What really happens is I get distracted geeking out on technology.
+
+* I created a few episodes originally with 2D animation in Adobe Character Animator.
+* I then created a few episodes using Unity as the rendering pipeline (HDRP).
+* I am now exploring NVIDIA Omniverse for rendering.
+
+I am trying to stick to free tools so others can give it a go and see if
+they like it before investing money into commercial tools.
+
+## When can I learn more?
+
+I blog at [extra-ordinary.tv/blog](https://extra-ordinary.tv/blog/)
+
+* [First Steps for VRoid Studio characters in NVIDIA Omniverse](https://extra-ordinary.tv/2023/05/28/2902/)
+* [VRoid Studio, meet NVIDIA Omniverse](https://extra-ordinary.tv/2023/05/10/vroid-studio-meet-nvidia-omniverse/)
