@@ -5,7 +5,7 @@
 import omni.ext
 import omni.ui as ui
 import omni.kit.commands
-from pxr import Usd, Sdf, Gf, UsdGeom, UsdShade
+from pxr import Usd, Sdf, Gf, UsdGeom
 from .ExtractFaceMeshes import ExtractFaceMeshes
 
 
@@ -19,11 +19,14 @@ def some_public_function(x: int):
 # instantiated when extension gets enabled and `on_startup(ext_id)` will be called. Later when extension gets disabled
 # on_shutdown() is called.
 class OrdinaryExtension(omni.ext.IExt):
+
     # ext_id is current extension id. It can be used with extension manager to query additional information, like where
     # this extension is located on filesystem.
     def on_startup(self, ext_id):
         self._window = ui.Window("VRM Import Cleanup v1", width=300, height=300)
         with self._window.frame:
+
+            # TODO: Clean up the UI... one day.
             with ui.VStack():
                 label = ui.Label("")
 
@@ -33,7 +36,7 @@ class OrdinaryExtension(omni.ext.IExt):
 
                 def on_dump():
                     label.text = "empty"
-                    # TODO: Debugging: Print hierarchy of all prims in stage, all attributes of prims that are arrays
+                    # Debugging: Print hierarchy of all prims in stage, all attributes of prims that are arrays
                     self.dump_stage()
 
                 label.text = "dump"
@@ -45,16 +48,23 @@ class OrdinaryExtension(omni.ext.IExt):
     def on_shutdown(self):
         print("[ordinary] ordinary shutdown")
 
+    # The main body of the clean up code for VRoid Studio characters.
     def clean_up_prim(self):
 
-        # TODO: Could wrap in a big 'undo' wrapper so there are all undone together
+        # VRoid Studio dependent code. This code has hard coded path names used by VRoid Studio characters.
+        # If needed, could clean this up to make more generic.
+        # But I am also hoping NVIDIA fix their GLB import code, so trying to minimize my effort.
 
-        # Convert to SkelRoot type.
-        # TODO: This is not a command, so Undo won't work on this one
+        # The problem is the bone structure is it picks one level too deep for the bone hierarchy.
+        # /World/Root/J_Bip_C_Hips0/Skeleton/J_Bip_C_Hips/... should have been one node higher, so Root was
+        # included under Skeleton. Without this, it thinks the Hips are the root bone (at height zero).
+        # To work around the problem, I go through all the joint lists and insert "Root/" at the start
+        # of the joint paths.
+
         ctx = omni.usd.get_context()
         stage = ctx.get_stage()
 
-        # TODO: I just removed this because I think its wrong
+        # TODO: May have a go at this again, moving everything up so its Root/Skeleton without the hips.
         # root_prim = stage.GetPrimAtPath('/World/Root')
         # root_prim.SetTypeName('SkelRoot')
 
@@ -71,7 +81,6 @@ class OrdinaryExtension(omni.ext.IExt):
         if skeleton_prim:
             self.add_parent_to_skeleton_joint_list(skeleton_prim, 'Root')
 
-        # TODO: Delete - turns out not necessary - something recomputes it automatically.
         for child in stage.GetPrimAtPath('/World/Root/J_Bip_C_Hips0').GetChildren():
             if child.IsA(UsdGeom.Mesh):
                 self.add_parent_to_mesh_joint_list(child, 'Root')
@@ -80,25 +89,16 @@ class OrdinaryExtension(omni.ext.IExt):
                     e = ExtractFaceMeshes(stage)
                     e.extract_face_meshes(child)
 
-        #self.add_parent_to_mesh_joint_list(stage, '/World/Root/J_Bip_C_Hips0/Face_baked', 'Root')
-        #self.add_parent_to_mesh_joint_list(stage, '/World/Root/J_Bip_C_Hips0/Body_baked', 'Root')
-        #self.add_parent_to_mesh_joint_list(stage, '/World/Root/J_Bip_C_Hips0/Hair001_baked', 'Root')
-        #self.add_parent_to_mesh_joint_list(stage, '/World/Root/J_Bip_C_Hips0/Face__merged__Clone_', 'Root')
-        #self.add_parent_to_mesh_joint_list(stage, '/World/Root/J_Bip_C_Hips0/Body__merged_', 'Root')
-        #self.add_parent_to_mesh_joint_list(stage, '/World/Root/J_Bip_C_Hips0/Hair001__merged_', 'Root')
-
         # Delete the dangling node (was old SkelRoot)
         # self.delete_if_no_children(stage, '/World/Root/J_Bip_C_Hips0')
 
-        # Delete old skeleton if present
+        # Delete old skeleton if present.
         if stage.GetPrimAtPath('/World/Root/J_Bip_C_Hips0/Skeleton/J_Bip_C_Hips'):
             omni.kit.commands.execute('DeletePrims', paths=[Sdf.Path('/World/Root/J_Bip_C_Hips0/Skeleton/J_Bip_C_Hips')])
 
+    # If a prim exists at the source path, move it to the target path.
+    # Returns true if moved, false otherwise.
     def move_if_necessary(self, stage, source_path, target_path):
-        """
-        If a prim exists at the source path, move it to the target path.
-        Returns true if moved, false otherwise.
-        """
         if stage.GetPrimAtPath(source_path):
             omni.kit.commands.execute(
                 'MovePrim',
@@ -109,15 +109,11 @@ class OrdinaryExtension(omni.ext.IExt):
             return True
         return False
 
+    # Delete the prim at the specified path if it exists and has no children.
+    # Returns true if deleted, false otherwise.
     def delete_if_no_children(self, stage, path):
-        """
-        Delete the prim at the specified path if it exists and has no children.
-        Returns true if deleted, false otherwise.
-        """
-        print(path)
         prim = stage.GetPrimAtPath(path)
         if prim:
-            print("found")
             if not prim.GetChildren():
                 omni.kit.commands.execute(
                     'DeletePrims',
@@ -153,19 +149,16 @@ class OrdinaryExtension(omni.ext.IExt):
         # https://docs.omniverse.nvidia.com/prod_kit/prod_kit/programmer_ref/usd/properties/set-attribute.html#omniverse-kit-commands
         joints.Set([parent_name] + [parent_name + '/' + jp for jp in joints.Get()])
 
-        # New unity matrices for the root node we added.
-        # ((1, 0, -0, 0), (0, 1, 0, -0), (0, -0, 1, 0), (0, 0, 0, 1))
+        # Insert unity matrix at the start for the root node we added.
+        # ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1))
         unity_matrix = Gf.Matrix4d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
         if bindTransforms.IsValid():
             bindTransforms.Set([unity_matrix] + [x for x in bindTransforms.Get()])
         if restTransforms.IsValid():
             restTransforms.Set([unity_matrix] + [x for x in restTransforms.Get()])
 
+    # The meshes have paths to bones as well - add "Root" to their paths as well.
     def add_parent_to_mesh_joint_list(self, mesh_prim, parent_name):
-        """
-        The meshes have paths to bones as well - add "Root" to their paths as well.
-        """
-        #mesh_prim = stage.GetPrimAtPath(path)
         if mesh_prim:
             joints: Usd.Attribute = mesh_prim.GetAttribute('skel:joints')
 
@@ -175,6 +168,7 @@ class OrdinaryExtension(omni.ext.IExt):
                 return True
         return False
 
+    # Going to delete this - ended up creating a separate class for this. It got tricky.
     #def split_disconnected_meshes(self, stage: Usd.Stage, mesh_prim: UsdGeom.Mesh):
     #    """
     #    Look for child GeomSubset prims and see if they have discontiguous meshes.
@@ -202,18 +196,16 @@ class OrdinaryExtension(omni.ext.IExt):
     #                    i += 1
     #                    
 
-
     #def split_subset(self, mesh_indices, subset_indices):
     #    """
     #    Given an array of mesh face vertex indicies (multiply them by 3 to get the points index)
     #    and an array of subset indices into the mesh indicies array, return an array of
     #    disconnected submeshes.
     #    """
+
+    # Traverse the tree of prims, printing out selected attribute information.
+    # Useful for debugging.
     def dump_stage(self):
-        """
-        Traverse the tree of prims, printing out selected attribute information.
-        Useful for debugging.
-        """
         ctx = omni.usd.get_context()
         stage = ctx.get_stage()
         for prim in stage.Traverse():

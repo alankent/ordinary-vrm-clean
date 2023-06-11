@@ -10,20 +10,20 @@ import math
 # Also https://docs.omniverse.nvidia.com/prod_kit/prod_kit/programmer_ref/usd/transforms/get-world-transforms.html
 
 
-def get_world_translate(prim: Usd.Prim) -> Gf.Vec3d:
-    """
-    Get the local transformation of a prim using Xformable.
-    See https://graphics.pixar.com/usd/release/api/class_usd_geom_xformable.html
-    Args:
-        prim: The prim to calculate the world transformation.
-    Returns:
-        - Translation vector.
-    """
-    xform = UsdGeom.Xformable(prim)
-    time = Usd.TimeCode.Default() # The time at which we compute the bounding box
-    world_transform: Gf.Matrix4d = xform.ComputeLocalToWorldTransform(time)
-    translation: Gf.Vec3d = world_transform.ExtractTranslation()
-    return translation
+#def get_world_translate(prim: Usd.Prim) -> Gf.Vec3d:
+#    """
+#    Get the local transformation of a prim using Xformable.
+#    See https://graphics.pixar.com/usd/release/api/class_usd_geom_xformable.html
+#    Args:
+#        prim: The prim to calculate the world transformation.
+#    Returns:
+#        - Translation vector.
+#    """
+#    xform = UsdGeom.Xformable(prim)
+#    time = Usd.TimeCode.Default() # The time at which we compute the bounding box
+#    world_transform: Gf.Matrix4d = xform.ComputeLocalToWorldTransform(time)
+#    translation: Gf.Vec3d = world_transform.ExtractTranslation()
+#    return translation
 
 
 class ExtractFaceMeshes:
@@ -32,16 +32,14 @@ class ExtractFaceMeshes:
         self.stage = stage
         self.segment_map = None
     
-    def mesh_is_face_mesh(mesh: UsdGeom.Mesh):
-        """
-        Return true if this Mesh is the Face mesh we want to convert.
-        Names are like "Face_baked" and "Face__merged__Clone_".
-        """
-        name: str = mesh.GetName()
-        if name.startswith("Face_"):
-            return True
-        else:
-            return False
+    # Return true if this Mesh is the Face mesh we want to convert.
+    # Names are like "Face_baked" and "Face__merged__Clone_".
+    #def mesh_is_face_mesh(mesh: UsdGeom.Mesh):
+    #    name: str = mesh.GetName()
+    #    if name.startswith("Face_"):
+    #        return True
+    #    else:
+    #        return False
     
     def extract_face_meshes(self, mesh: UsdGeom.Mesh):
         
@@ -75,21 +73,26 @@ class ExtractFaceMeshes:
                     self.extract_irises(mesh, child)
 
     # Copy the whole mesh across for the face.
-    # The original mesh in VRoid seems to have points that are not used.
+    # The original mesh in VRoid points that are not used in any face.
     def extract_face_skin(self, old_mesh: UsdGeom.Mesh, old_subset: UsdGeom.Subset):
-        """
-        Create a new Mesh for the face based on the old mesh subset.
-        """
         material = UsdShade.MaterialBindingAPI(old_subset).GetDirectBindingRel().GetTargets()
         new_mesh = MeshMaker(self.stage, material)
         self.copy_subset(new_mesh, old_mesh, old_subset)
         new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild('face_skin'))
 
+    # Extract multiple meshes from the mouth: upper teeth (needs joining), lower teeth (needs joining),
+    # tounge, and mouth cavity.
     def extract_mouth(self, old_mesh: UsdGeom.Mesh, old_subset: UsdGeom.Subset):
-        """
-        Extract multiple meshes from the mouth: upper teeth (needs joining), lower teeth (needs joining),
-        tounge, and mouth cavity.
-        """
+
+        # This one is the most tricky case. There is one "subset" for the mouth, which includes upper
+        # and lower teeth, as well as the mouth cavity. We need upper and lower teeth in their own
+        # meshes for Audio2Face to work.
+        # So, we segment the mesh, ignoring points that are not actually used by faces (there are lot!).
+        # The first two connected meshes are for the inside and outside of the teeth.
+        # The next two are the lower teeth.
+        # Then there is a single connected mesh for the mouth cavity.
+        # Finally there are another two meshes for the top and bottom of the tongue.
+
         num_segments = self.segment_mesh(old_mesh, old_subset)
         if num_segments == 7:
             material = UsdShade.MaterialBindingAPI(old_subset).GetDirectBindingRel().GetTargets()
@@ -116,43 +119,54 @@ class ExtractFaceMeshes:
             
         self.clear_segment_map()
 
+    # Eyeline we could split into left and right eyes, but we don't need to.
+    # It uses a separate mesh with its own material.
     def extract_eyeline(self, old_mesh: UsdGeom.Mesh, old_subset: UsdGeom.Subset):
         material = UsdShade.MaterialBindingAPI(old_subset).GetDirectBindingRel().GetTargets()
         new_mesh = MeshMaker(self.stage, material)
         self.copy_subset(new_mesh, old_mesh, old_subset)
         new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild('eyeline'))
 
+    # Eyelash we could split into left and right eyes, but we don't need to.
+    # It uses a separate mesh with its own material.
     def extract_eyelash(self, old_mesh: UsdGeom.Mesh, old_subset: UsdGeom.Subset):
         material = UsdShade.MaterialBindingAPI(old_subset).GetDirectBindingRel().GetTargets()
         new_mesh = MeshMaker(self.stage, material)
         self.copy_subset(new_mesh, old_mesh, old_subset)
         new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild('eyelash'))
 
+    # Eyebrows we could split into left and right eyes, but we don't need to.
+    # It uses a separate mesh with its own material.
     def extract_eyebrow(self, old_mesh: UsdGeom.Mesh, old_subset: UsdGeom.Subset):
         material = UsdShade.MaterialBindingAPI(old_subset).GetDirectBindingRel().GetTargets()
         new_mesh = MeshMaker(self.stage, material)
         self.copy_subset(new_mesh, old_mesh, old_subset)
         new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild('eyebrow'))
 
+    # Eyewhites are interesting. Rather than be a sphere or similar, there is actually a gap
+    # behind the irises, which causes shadows. Might want to adjust these one day, but they
+    # stop from being able to look inside the head when the eyes move (the whites do not move).
     def extract_eyewhites(self, old_mesh: UsdGeom.Mesh, old_subset: UsdGeom.Subset):
-        """
-        May need two - one for left eye and one for right eye.
-        """
         material = UsdShade.MaterialBindingAPI(old_subset).GetDirectBindingRel().GetTargets()
         new_mesh = MeshMaker(self.stage, material)
         self.copy_subset(new_mesh, old_mesh, old_subset)
         new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild('eyewhites'))
 
+    # We need to extract the left and right eye irises. There is lots of other points and things
+    # that are not actually used, so we want to toss them.
     def extract_irises(self, old_mesh: UsdGeom.Mesh, old_subset: UsdGeom.Subset):
-        """
-        Extract two eye meshes separately, then add them under an Xform prim so they can pivot.
-        """
         self.segment_mesh(old_mesh, old_subset)
         eyes = ["left_eye", "right_eye"]
         for i in range(len(eyes)):
+
             material = UsdShade.MaterialBindingAPI(old_subset).GetDirectBindingRel().GetTargets()
             new_mesh = MeshMaker(self.stage, material)
             self.copy_subset(new_mesh, old_mesh, old_subset, i, i)
+
+            # We do a bit more work because eyes need to rotate. So we insert an Xform about the
+            # Mesh for the two eyes. Its a bit behind the eyes, moved a bit towards the center of the head
+            # as the front of the characters is more rounded than a real head.
+            # We use the size of the iris to estimate how far behind the iris the pivot point needs to go.
             pivot_prim_path = old_mesh.GetPath().GetParentPath().AppendChild(eyes[i] + "_pivot")
             xformPrim = UsdGeom.Xform.Define(self.stage, pivot_prim_path)
             eye_mesh: UsdGeom.Mesh = new_mesh.create_at_path(pivot_prim_path.AppendChild(eyes[i]))
@@ -162,8 +176,13 @@ class ExtractFaceMeshes:
             (dx,dy,dz) = ((x1+x2)/4.0, (y1+y2)/2.0, z2 - (y2-y1) * 2.0)
             UsdGeom.XformCommonAPI(xformPrim).SetTranslate((dx, dy, dz))
             UsdGeom.XformCommonAPI(eye_mesh).SetTranslate((-dx, -dy, -dz))
+
         self.clear_segment_map()
 
+    # A GeomSubset holds an array of indicies of which faces are used by this subset.
+    # But we need it in a separate Mesh for Audio2Face to be happy.
+    # So we run down the list of referenced faces, and add them to a completely new Mesh.
+    # This drops lots of unused points and cleans up the model.
     def copy_subset(self, new_mesh: MeshMaker, old_mesh: UsdGeom.Mesh, old_subset: UsdGeom.Subset, segment1=None, segment2=None):
         faceVertexIndices = old_mesh.GetAttribute('faceVertexIndices').Get()
         points = old_mesh.GetAttribute('points').Get()     # GetPointsAttr().Get()
@@ -171,6 +190,9 @@ class ExtractFaceMeshes:
         st = old_mesh.GetAttribute('primvars:st').Get()
         for face_index in old_subset.GetAttribute('indices').Get():  # GetIndicesAttr().Get():
             if self.segment_map is None or self.segment_map[face_index] == segment1 or self.segment_map[face_index] == segment2:
+
+                # This is hard coded for VRoid Studio in that it assumes each face is a triangle with 3 points.
+                # Pull the details of each triangle on the surface and add it to a new mesh, building it up from scratch.
                 p1 = points[faceVertexIndices[face_index * 3]]
                 p2 = points[faceVertexIndices[face_index * 3 + 1]]
                 p3 = points[faceVertexIndices[face_index * 3 + 2]]
@@ -182,35 +204,42 @@ class ExtractFaceMeshes:
                 st3 = st[face_index * 3 + 2]
                 new_mesh.add_face(p1, p2, p3, n1, n2, n3, st1, st2, st3)
 
+    # Clear the segment map.
     def clear_segment_map(self):
         self.segment_map = None
 
+    # Create a segment map by running through all the faces (and their verticies), then any other face
+    # that shares a point with the same mesh is also considered to be part of the same segment.
     def segment_mesh(self, old_mesh: UsdGeom.Mesh, old_subset: UsdGeom.Subset):
+
+        # Work out some commonly used attributes.
         faceVertexIndices = old_mesh.GetAttribute('faceVertexIndices').Get()
         subset_indices = old_subset.GetAttribute('indices').Get()
         num_faces = math.ceil(len(faceVertexIndices) / 3)
         self.segment_map = [None] * num_faces
         segment = 0
 
+        # Loop until we fail to find a face that has not been marked with a segment number.
         while True:
-
-            # Find first unused face
             i = 0
             while i < len(subset_indices) and self.segment_map[subset_indices[i]] is not None:
                 i += 1
             if i == len(subset_indices):
-                break  # Nothing found, so all done!
+                # Nothing found, so we are all done!
+                break
             first_face = i
 
-            # Make a pass through the array looking for faces that share a point we have seen before.
+            # Rather than adding the 3D coordinates, we add the index to the array of "points".
+            # If anything reuses the same index, then its in the same continuous mesh.
             seen = set()
             seen.add(faceVertexIndices[subset_indices[i] * 3])
             seen.add(faceVertexIndices[subset_indices[i] * 3 + 1])
             seen.add(faceVertexIndices[subset_indices[i] * 3 + 2])
             self.segment_map[i] = segment
-            
+
+            # We have no guarantee on the order of faces, so we do a pass from front to end.
+            # If a face was added to the current segment, we retry until we fail to find anything.            
             found_one = True
-            # print("segment " + str(segment))
             while found_one:
                 found_one = False
                 i = first_face
@@ -218,17 +247,15 @@ class ExtractFaceMeshes:
                     face = subset_indices[i]
                     if self.segment_map[face] is None:
                         if faceVertexIndices[face * 3] in seen or faceVertexIndices[face * 3 + 1] in seen or faceVertexIndices[face * 3 + 2] in seen:
+                            # One of the 3 points of the current Face shares a vertex with the current mesh,
+                            # so add all 3 points as belonging to the mesh and mark that we did find at least one more.
                             seen.add(faceVertexIndices[face * 3])
                             seen.add(faceVertexIndices[face * 3 + 1])
                             seen.add(faceVertexIndices[face * 3 + 2])
                             self.segment_map[face] = segment
                             found_one = True
                     i += 1
-                #print(self.segment_map)
             
             segment += 1
-
-        # print("Found " + str(segment) + " segments in " + old_subset.GetName())
-        # print(self.segment_map)
 
         return segment
