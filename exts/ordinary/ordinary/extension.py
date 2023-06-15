@@ -6,7 +6,7 @@ import omni.ext
 import omni.ui as ui
 import omni.kit.commands
 from pxr import Usd, Sdf, Gf, UsdGeom
-from .ExtractFaceMeshes import ExtractFaceMeshes
+from .ExtractMeshes import ExtractMeshes
 
 
 # Functions and vars are available to other extension as usual in python: `example.python_ext.some_public_function(x)`
@@ -86,8 +86,14 @@ class OrdinaryExtension(omni.ext.IExt):
                 self.add_parent_to_mesh_joint_list(child, 'Root')
                 # self.split_disconnected_meshes(stage, child)
                 if child.GetName().startswith("Face_"):
-                    e = ExtractFaceMeshes(stage)
+                    e = ExtractMeshes(stage)
                     e.extract_face_meshes(child)
+                if child.GetName().startswith("Hair"):
+                    e = ExtractMeshes(stage)
+                    e.extract_hair_meshes(child)
+                if child.GetName().startswith("Body_"):
+                    e = ExtractMeshes(stage)
+                    e.extract_body_meshes(child)
 
         # Delete the dangling node (was old SkelRoot)
         # self.delete_if_no_children(stage, '/World/Root/J_Bip_C_Hips0')

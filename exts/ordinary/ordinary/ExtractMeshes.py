@@ -2,7 +2,7 @@ import typing
 import omni.ext
 import omni.ui as ui
 import omni.kit.commands
-from pxr import Usd, Sdf, Gf, UsdGeom, UsdShade
+from pxr import Usd, Sdf, Gf, UsdGeom, UsdShade, UsdSkel
 from .MeshMaker import MeshMaker
 import math
 
@@ -26,7 +26,7 @@ import math
 #    return translation
 
 
-class ExtractFaceMeshes:
+class ExtractMeshes:
     
     def __init__(self, stage: Usd.Stage):
         self.stage = stage
@@ -72,13 +72,47 @@ class ExtractFaceMeshes:
                 elif "_EyeIris" in name:
                     self.extract_irises(mesh, child)
 
+    def extract_hair_meshes(self, old_mesh: UsdGeom.Mesh):
+        # Run through the children sub-meshes and copy them to their own Mesh
+        n = 0
+        for child in old_mesh.GetChildren():
+            if child.IsA(UsdGeom.Subset):
+                material = UsdShade.MaterialBindingAPI(child).GetDirectBindingRel().GetTargets()
+                skeleton = UsdSkel.BindingAPI(old_mesh).GetSkeletonRel().GetTargets()
+                skelJoints = UsdSkel.BindingAPI(old_mesh).GetJointsAttr().Get()
+                new_mesh = MeshMaker(self.stage, material, skeleton, skelJoints)
+                self.copy_subset(new_mesh, old_mesh, child)
+                new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild('hair_' + str(n)))
+                n += 1
+
+    def extract_body_meshes(self, old_mesh: UsdGeom.Mesh):
+        # Run through the children sub-meshes and copy them to their own Mesh
+        n = 0
+        for child in old_mesh.GetChildren():
+            if child.IsA(UsdGeom.Subset):
+                material = UsdShade.MaterialBindingAPI(child).GetDirectBindingRel().GetTargets()
+                skeleton = UsdSkel.BindingAPI(old_mesh).GetSkeletonRel().GetTargets()
+                skelJoints = UsdSkel.BindingAPI(old_mesh).GetJointsAttr().Get()
+                new_mesh = MeshMaker(self.stage, material, skeleton, skelJoints)
+                self.copy_subset(new_mesh, old_mesh, child)
+                name: str = child.GetName()
+                if "_Body_" in name:
+                    new_name = 'bodyskin'
+                elif "_Tops_" in name:
+                    new_name = 'clothes_upper'
+                elif "_Bottoms_" in name:
+                    new_name = 'clothes_lower'
+                elif "_Shoes_" in name:
+                    new_name = 'shoes'
+                else:
+                    new_name = 'body_' + str(n)
+                    n += 1
+                new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild(new_name))
+
     # Copy the whole mesh across for the face.
     # The original mesh in VRoid points that are not used in any face.
     def extract_face_skin(self, old_mesh: UsdGeom.Mesh, old_subset: UsdGeom.Subset):
-        material = UsdShade.MaterialBindingAPI(old_subset).GetDirectBindingRel().GetTargets()
-        new_mesh = MeshMaker(self.stage, material)
-        self.copy_subset(new_mesh, old_mesh, old_subset)
-        new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild('face_skin'))
+        self.make_mesh_from_subset(old_mesh, old_subset, 'face_skin')
 
     # Extract multiple meshes from the mouth: upper teeth (needs joining), lower teeth (needs joining),
     # tounge, and mouth cavity.
@@ -96,24 +130,26 @@ class ExtractFaceMeshes:
         num_segments = self.segment_mesh(old_mesh, old_subset)
         if num_segments == 7:
             material = UsdShade.MaterialBindingAPI(old_subset).GetDirectBindingRel().GetTargets()
+            skeleton = UsdSkel.BindingAPI(old_mesh).GetSkeletonRel().GetTargets()
+            skelJoints = UsdSkel.BindingAPI(old_mesh).GetJointsAttr().Get()
 
             # 0 = inner upper teeth, 1 = outer upper teeth
-            new_mesh = MeshMaker(self.stage, material)
+            new_mesh = MeshMaker(self.stage, material, skeleton, skelJoints)
             self.copy_subset(new_mesh, old_mesh, old_subset, 0, 1)
             new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild('upper_teeth'))
 
             # 2 = inner lower teeth, 3 = outer lower teeth
-            new_mesh = MeshMaker(self.stage, material)
+            new_mesh = MeshMaker(self.stage, material, skeleton, skelJoints)
             self.copy_subset(new_mesh, old_mesh, old_subset, 2, 3)
             new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild('lower_teeth'))
             
             # 4 = mouth cavity
-            new_mesh = MeshMaker(self.stage, material)
+            new_mesh = MeshMaker(self.stage, material, skeleton, skelJoints)
             self.copy_subset(new_mesh, old_mesh, old_subset, 4, 4)
             new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild('mouth_cavity'))
             
             # 5 = upper tongue, 6 = lower tongue
-            new_mesh = MeshMaker(self.stage, material)
+            new_mesh = MeshMaker(self.stage, material, skeleton, skelJoints)
             self.copy_subset(new_mesh, old_mesh, old_subset, 5, 6)
             new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild('tongue'))
             
@@ -122,35 +158,23 @@ class ExtractFaceMeshes:
     # Eyeline we could split into left and right eyes, but we don't need to.
     # It uses a separate mesh with its own material.
     def extract_eyeline(self, old_mesh: UsdGeom.Mesh, old_subset: UsdGeom.Subset):
-        material = UsdShade.MaterialBindingAPI(old_subset).GetDirectBindingRel().GetTargets()
-        new_mesh = MeshMaker(self.stage, material)
-        self.copy_subset(new_mesh, old_mesh, old_subset)
-        new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild('eyeline'))
+        self.make_mesh_from_subset(old_mesh, old_subset, 'eyeline')
 
     # Eyelash we could split into left and right eyes, but we don't need to.
     # It uses a separate mesh with its own material.
     def extract_eyelash(self, old_mesh: UsdGeom.Mesh, old_subset: UsdGeom.Subset):
-        material = UsdShade.MaterialBindingAPI(old_subset).GetDirectBindingRel().GetTargets()
-        new_mesh = MeshMaker(self.stage, material)
-        self.copy_subset(new_mesh, old_mesh, old_subset)
-        new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild('eyelash'))
+        self.make_mesh_from_subset(old_mesh, old_subset, 'eyelash')
 
     # Eyebrows we could split into left and right eyes, but we don't need to.
     # It uses a separate mesh with its own material.
     def extract_eyebrow(self, old_mesh: UsdGeom.Mesh, old_subset: UsdGeom.Subset):
-        material = UsdShade.MaterialBindingAPI(old_subset).GetDirectBindingRel().GetTargets()
-        new_mesh = MeshMaker(self.stage, material)
-        self.copy_subset(new_mesh, old_mesh, old_subset)
-        new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild('eyebrow'))
+        self.make_mesh_from_subset(old_mesh, old_subset, 'eyebrow')
 
     # Eyewhites are interesting. Rather than be a sphere or similar, there is actually a gap
     # behind the irises, which causes shadows. Might want to adjust these one day, but they
     # stop from being able to look inside the head when the eyes move (the whites do not move).
     def extract_eyewhites(self, old_mesh: UsdGeom.Mesh, old_subset: UsdGeom.Subset):
-        material = UsdShade.MaterialBindingAPI(old_subset).GetDirectBindingRel().GetTargets()
-        new_mesh = MeshMaker(self.stage, material)
-        self.copy_subset(new_mesh, old_mesh, old_subset)
-        new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild('eyewhites'))
+        self.make_mesh_from_subset(old_mesh, old_subset, 'eyewhites')
 
     # We need to extract the left and right eye irises. There is lots of other points and things
     # that are not actually used, so we want to toss them.
@@ -160,7 +184,9 @@ class ExtractFaceMeshes:
         for i in range(len(eyes)):
 
             material = UsdShade.MaterialBindingAPI(old_subset).GetDirectBindingRel().GetTargets()
-            new_mesh = MeshMaker(self.stage, material)
+            skeleton = UsdSkel.BindingAPI(old_mesh).GetSkeletonRel().GetTargets()
+            skelJoints = UsdSkel.BindingAPI(old_mesh).GetJointsAttr().Get()
+            new_mesh = MeshMaker(self.stage, material, skeleton, skelJoints)
             self.copy_subset(new_mesh, old_mesh, old_subset, i, i)
 
             # We do a bit more work because eyes need to rotate. So we insert an Xform about the
@@ -179,6 +205,15 @@ class ExtractFaceMeshes:
 
         self.clear_segment_map()
 
+    # Create a new mesh from the given submesh (copy it all to a new Mesh)
+    def make_mesh_from_subset(self, old_mesh, old_subset, prim_name):
+        material = UsdShade.MaterialBindingAPI(old_subset).GetDirectBindingRel().GetTargets()
+        skeleton = UsdSkel.BindingAPI(old_mesh).GetSkeletonRel().GetTargets()
+        skelJoints = UsdSkel.BindingAPI(old_mesh).GetJointsAttr().Get()
+        new_mesh = MeshMaker(self.stage, material, skeleton, skelJoints)
+        self.copy_subset(new_mesh, old_mesh, old_subset)
+        new_mesh.create_at_path(old_mesh.GetPath().GetParentPath().AppendChild(prim_name))
+
     # A GeomSubset holds an array of indicies of which faces are used by this subset.
     # But we need it in a separate Mesh for Audio2Face to be happy.
     # So we run down the list of referenced faces, and add them to a completely new Mesh.
@@ -188,21 +223,23 @@ class ExtractFaceMeshes:
         points = old_mesh.GetAttribute('points').Get()     # GetPointsAttr().Get()
         normals = old_mesh.GetAttribute('normals').Get()   # GetNormalsAttr().Get()
         st = old_mesh.GetAttribute('primvars:st').Get()
+        jointIndices = old_mesh.GetAttribute('primvars:skel:jointIndices').Get()
+        jointWeights = old_mesh.GetAttribute('primvars:skel:jointWeights').Get()
         for face_index in old_subset.GetAttribute('indices').Get():  # GetIndicesAttr().Get():
             if self.segment_map is None or self.segment_map[face_index] == segment1 or self.segment_map[face_index] == segment2:
 
                 # This is hard coded for VRoid Studio in that it assumes each face is a triangle with 3 points.
                 # Pull the details of each triangle on the surface and add it to a new mesh, building it up from scratch.
-                p1 = points[faceVertexIndices[face_index * 3]]
-                p2 = points[faceVertexIndices[face_index * 3 + 1]]
-                p3 = points[faceVertexIndices[face_index * 3 + 2]]
+                pi1 = faceVertexIndices[face_index * 3]
+                pi2 = faceVertexIndices[face_index * 3 + 1]
+                pi3 = faceVertexIndices[face_index * 3 + 2]
                 n1 = normals[face_index * 3]
                 n2 = normals[face_index * 3 + 1]
                 n3 = normals[face_index * 3 + 2]
                 st1 = st[face_index * 3]
                 st2 = st[face_index * 3 + 1]
                 st3 = st[face_index * 3 + 2]
-                new_mesh.add_face(p1, p2, p3, n1, n2, n3, st1, st2, st3)
+                new_mesh.add_face(points, jointIndices, jointWeights, pi1, pi2, pi3, n1, n2, n3, st1, st2, st3)
 
     # Clear the segment map.
     def clear_segment_map(self):
